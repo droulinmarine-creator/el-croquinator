@@ -58,7 +58,7 @@ const int daylightOffset_sec = 3600;
 // Timer variables
 const unsigned long FEED_DELAY_SEC = 10 ;
 RtcDateTime lastFeedtime;
-unsigned long heureactuelle;
+unsigned long maintenantSec = 0;
 
 
 // Logo (chat)
@@ -137,15 +137,15 @@ void setup()
 void loop()
 {
   Serial.println("Début de la Boucle principale");
-
+// fonction principale
   // Vérifier l'heure
-  RtcDateTime maintenant = getRtcTime();
+  RtcDateTime maintenantSec = getRtcTime();
   // Si le chat est affamé : Verifier le délai depuis le dernier
-  unsigned long deltaSecondes = maintenant.TotalSeconds() - lastFeedtime.TotalSeconds();
+  unsigned long deltaSecondes = maintenantSec.TotalSeconds() - lastFeedtime.TotalSeconds();  // interval de temps
   
-  if (deltaSecondes >= FEED_DELAY_SEC) // interval de temps
+  if (deltaSecondes >= FEED_DELAY_SEC) // Si le délai est écoulé
     { 
-      feedCat(croquettes);
+      feedCat(croquettes);      // Nourrir le chat avec une portion complète
     }
   
 
