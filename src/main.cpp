@@ -29,13 +29,9 @@ const char *password = "LP48.100+";
 #define OLED_I2C_ADRESS 0x3C // Adresse de "mon" écran OLED sur le bus i2c (généralement égal à 0x3C ou 0x3D)
 Adafruit_SSD1306 oled(SCREEN_WIdtH, SCREEN_HEIGHT, &Wire, OLED_RESET_PIN);
 
-// Capteur distance HC-SR04
-#define ECHO_PIN 7
-#define TRIGGER_PIN 8
-
 // Servomoteur
 #include <Servo.h>
-#define SERVO_PIN 3
+#define SERVO_PIN D3
 Servo monServomoteur;                       // Crée un objet Servo
 const int ANGLE_OUVERTURE = 180;     // Angle pour ouvrir la valve
 const int ANGLE_FERMETURE = 0;       // Angle pour fermer la valve
@@ -43,12 +39,11 @@ const unsigned int croquinettes = 111; // temps (ms) ouverture rapide
 const unsigned int croquettes = 500;  // temps (ms) ouverture longue
 
 // RTC Time
-#include <RtcDS1302.h>
-#define DS1302_CLK_PIN 6
-#define DS1302_DAT_PIN 7
-#define DS1302_RST_PIN 5
-ThreeWire myWire(DS1302_DAT_PIN,DS1302_CLK_PIN,DS1302_RST_PIN); // IO, SCLK, CE
-RtcDS1302<ThreeWire> myRTC(myWire);
+#include "virtuabotixRTC.h"
+#define DS1302_CLK_PIN D6
+#define DS1302_DAT_PIN D7
+#define DS1302_RST_PIN D5
+virtuabotixRTC myRTC(DS1302_CLK_PIN, DS1302_DAT_PIN, DS1302_RST_PIN);
 
 /* Local time */
 const char *ntpServer = "pool.ntp.org";
@@ -56,9 +51,20 @@ const long gmtOffset_sec = 3600;
 const int daylightOffset_sec = 3600;
 
 // Timer variables
-const unsigned long FEED_DELAY_SEC = 10 ;
-RtcDateTime lastFeedtime;
+const unsigned long FEED_DELAY_CROQUETTES_SEC = 2 * 60 * 60; // Délai minimum entre deux nourrissages (2 heures)
+const unsigned long FEED_DELAY_CROQUINETTES_SEC = 30 * 60; // Délai minimum entre deux nourrissages rapides (30 minutes) 
+unsigned long lastFeedtimeCroquettes = 0; // Dernier temps (en secondes depuis minuit) où le chat a été nourri avec des croquettes
+unsigned long lastFeedtimecroquinettes = 0; // Dernier temps (en secondes depuis minuit) où le chat a été nourri avec quelques croquinettes
 unsigned long maintenantSec = 0;
+
+// Bouton poussoir
+const int BOUTON = 4; // Pin du bouton poussoir
+const int BoutonSec = 50; // Durée (ms) pour considérer une pression comme valide
+int etatBouton;           // État actuel du bouton  
+
+// Led
+const int led = 13;      // Pin de la LED 
+int etatled = LOW; // État actuel de la LED
 
 
 // Logo (chat)
@@ -95,7 +101,8 @@ void setupScreen();                                                         // (
 void printMessage(char *title, char *message, unsigned int displayTimeSec); // Affiche un message sur l'écran OLED
 void printImage(unsigned int displayTimeSec);                               // Affichage d'une image au centre de l'écran
 void openValve(unsigned int timeOpen);                                      // Donne la nourriture
-RtcDateTime getRtcTime();                                                          // Imprime le temps RTC dans la console
+void getRtcTime();         
+unsigned long getRtcSecondsFromMidnight();                                                 // Imprime le temps RTC dans la console
 char* getWiFiTime();                                                       // Récupère la date depuis le wifi
 int calculateDistance();                                                    // Mesure la distance du capteur
 void feedCat(int timeOpen);
@@ -109,24 +116,27 @@ void setup()
     ; // wait until Arduino Serial Monitor opens
 
   // Initialize persistent storage space
-  preferences.begin("croquinator-settings", false);
-  setupSPIFFS();
+  //preferences.begin("croquinator-settings", false);
+  //setupSPIFFS();
   // Configuration du WiFi
-  setupWiFi();
+  //setupWiFi();
   // Récupération de l'heure depuis le WiFi
-  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer); // NTP server config
+  //configTime(gmtOffset_sec, daylightOffset_sec, ntpServer); // NTP server config
 
   // Configuration de l'horloge interne  
- myRTC.Begin();
+  myRTC.setDS1302Time(0, 58, 17, 4, 17, 12, 2020); // sec min h, j semaine, j mois, mois, année
  
-
-  // Configuration du capteur de distance
-  pinMode(TRIGGER_PIN, OUTPUT); // Broche Trigger en sortie //
-  pinMode(ECHO_PIN, INPUT);     // Broche Echo en entree //
 
   // Configuration du Servomoteur
   monServomoteur.attach(SERVO_PIN);      // Attache l'objet Servo à la broche D9 de l'Arduino
   monServomoteur.write(ANGLE_FERMETURE); // S'assure que la valve est fermée au démarrage
+
+  // Configuration du bouton poussoir
+  pinMode(BOUTON, INPUT);   // le bouton est une entrée
+   etatBouton = HIGH; // on initialise l'état du bouton comme "relaché"
+
+  // Configuration de la LED
+    pinMode(led, OUTPUT); // la led est une sortie
 
   // Just to know which program is running
   Serial.println(F("START " __FILE__ " from " __DATE__ "\r\n"));
@@ -139,30 +149,47 @@ void loop()
   Serial.println("Début de la Boucle principale");
 // fonction principale
   // Vérifier l'heure
-  RtcDateTime maintenantSec = getRtcTime();
+  maintenantSec = getRtcSecondsFromMidnight();
   // Si le chat est affamé : Verifier le délai depuis le dernier
-  unsigned long deltaSecondes = maintenantSec.TotalSeconds() - lastFeedtime.TotalSeconds();  // interval de temps
+  unsigned long deltaSecondes = maintenantSec - lastFeedtimeCroquettes;  // interval de temps
   
-  if (deltaSecondes >= FEED_DELAY_SEC) // Si le délai est écoulé
+  if (deltaSecondes >= FEED_DELAY_CROQUETTES_SEC) // Si le délai de 2H est écoulé
     { 
+      // Vérifier la distance
       feedCat(croquettes);      // Nourrir le chat avec une portion complète
+      lastFeedtimeCroquettes= maintenantSec; // Met à jour le dernier temps de nourrissage
     }
   
 
-      // Vérifier la distance
-      // Si le chat est trop insistant
-      //feedCat(); // Bonus: diminuer le temps d'ouverture pour un petit feed
-
       // Vérifier les boutons
-      // Si un humain veut nourrir le chat
-      // Verifier le délai depuis le dernier
-      // Si OK
-    
-      //feedCat();
-      //SI NON
-      //printMessage("Attente...", "Prochain repas dans 2h", 5);
+ etatBouton = digitalRead(BOUTON); // Lecture de l'état du bouton
+
+ if (etatBouton == HIGH) 
+ {
+Serial.println("Le bouton est appuyé");
+digitalWrite(led, HIGH); // Allume la LED
+
+  unsigned long deltaSecondes = maintenantSec - lastFeedtimecroquinettes;  // interval de temps
+  
+  if (deltaSecondes >= FEED_DELAY_CROQUINETTES_SEC) // Si le délai de 30 min est écoulé
+    { 
+      feedCat(croquinettes);      // Nourrir le chat avec quelques croquettes
+      lastFeedtimecroquinettes= maintenantSec; // Met à jour le dernier temps de gourmandise
+    }
+delay(BoutonSec); // Anti-rebond
+} 
+else 
+{
+Serial.println("Le bouton n'est pas appuyé");
+
+digitalWrite(led, LOW); // Éteint la LED}
+
+char message[56];
+const unsigned int deltaMinutes = deltaSecondes / 60;
+sprintf(message, "Dernières Croquinettes il y a %d min", deltaMinutes);
 
       delay(1000);
+}
 }
 // -------------------                BOUCLE LOOP (fin)                ------------------- /
 
@@ -174,7 +201,6 @@ void feedCat(int timeOpen)
     // Ouvrir la valve pour laisser tomber les croquettes
   openValve(timeOpen);
   // Enregistrer l'heure de feed
-  lastFeedtime = getRtcTime();
   // preferences.putULong("feedtime", value);
   // Bonus: Afficher un message sur ecran
 };
@@ -269,57 +295,41 @@ void openValve(unsigned int timeOpen)
   monServomoteur.write(ANGLE_FERMETURE); // Ferme
 }
 
-RtcDateTime getRtcTime()
+void getRtcTime()
 { 
-RtcDateTime dt = myRTC.GetDateTime();
-char datestring[26];
+  myRTC.updateTime();
 
-    snprintf_P(datestring, 
-            countof(datestring),
-            PSTR("%02u/%02u/%04u %02u:%02u:%02u"),
-            dt.Month(),
-            dt.Day(),
-            dt.Year(),
-            dt.Hour(),
-            dt.Minute(),
-            dt.Second() );
-    Serial.println(datestring);
-    
-    return dt;
+  Serial.print("Date / Heure: ");
+  Serial.print(myRTC.dayofmonth);
+  Serial.print("/");
+  Serial.print(myRTC.month);
+  Serial.print("/");
+  Serial.print(myRTC.year);
+  Serial.print(" ");
+  Serial.print(myRTC.hours);
+  Serial.print(":");
+  Serial.print(myRTC.minutes);
+  Serial.print(":");
+  Serial.println(myRTC.seconds);
 }
-
-// Get time stamp
-char* getWiFiTime()
+unsigned long getRtcSecondsFromMidnight()
 {
-  struct tm timeinfo;
-  if (!getLocalTime(&timeinfo))
-  {
-    Serial.println("Failed to obtain time");
-  }
-  // Convert to string
-  char timeStr[19];
-  strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", &timeinfo);
-  // strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
-  return timeStr;
+  myRTC.updateTime();
+  unsigned long totalSeconds = myRTC.hours * 3600 + myRTC.minutes * 60 + myRTC.seconds;
+  return totalSeconds;
 }
 
-int calculateDistance()
-{
-  // Debut de la mesure avec un signal de 10 μS applique sur TRIG //
-  digitalWrite(TRIGGER_PIN, LOW); // On efface l'etat logique de TRIG //
-  delayMicroseconds(2);
-  digitalWrite(TRIGGER_PIN, HIGH); // On met la broche TRIG a "1" pendant 10μS //
-  delayMicroseconds(10);
-  digitalWrite(TRIGGER_PIN, LOW); // On remet la broche TRIG a "0" //
-  // On mesure combien de temps le niveau logique haut est actif sur ECHO //
-  const int duration = pulseIn(ECHO_PIN, HIGH);
-  // Calcul de la distance grace au temps mesure //
-  const int distance = duration * 0.034 / 2;
-
-  // Affichage dans le moniteur serie de la distance mesuree //
-  Serial.print("Distance mesuree : ");
-  Serial.print(distance);
-  Serial.println(" cm");
-
-  return distance;
-}
+// // Get time stamp
+// char* getWiFiTime()
+// {
+//   struct tm timeinfo;
+//   if (!getLocalTime(&timeinfo))
+//   {
+//     Serial.println("Failed to obtain time");
+//   }
+//   // Convert to string
+//   char timeStr[19];
+//   strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", &timeinfo);
+//   // strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
+//   return 'z';
+// }
