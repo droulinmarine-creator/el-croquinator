@@ -147,24 +147,26 @@ void setup()
 void loop()
 {
   Serial.println("Début de la Boucle principale");
+ 
 // fonction principale
   // Vérifier l'heure
   maintenantSec = getRtcSecondsFromMidnight();
+  Serial.println(maintenantSec);
   // Si le chat est affamé : Verifier le délai depuis le dernier
   unsigned long deltaSecondes = maintenantSec - lastFeedtimeCroquettes;  // interval de temps
-  
+  Serial.println(deltaSecondes);
   if (deltaSecondes >= FEED_DELAY_CROQUETTES_SEC) // Si le délai de 2H est écoulé
     { 
       // Vérifier la distance
       feedCat(croquettes);      // Nourrir le chat avec une portion complète
-      lastFeedtimeCroquettes= maintenantSec; // Met à jour le dernier temps de nourrissage
+      lastFeedtimeCroquettes = maintenantSec; // Met à jour le dernier temps de nourrissage
     }
   
 
       // Vérifier les boutons
  etatBouton = digitalRead(BOUTON); // Lecture de l'état du bouton
 
- if (etatBouton == HIGH) 
+ if (etatBouton == HIGH)   // Si le bouton est appuyé
  {
 Serial.println("Le bouton est appuyé");
 digitalWrite(led, HIGH); // Allume la LED
@@ -174,19 +176,19 @@ digitalWrite(led, HIGH); // Allume la LED
   if (deltaSecondes >= FEED_DELAY_CROQUINETTES_SEC) // Si le délai de 30 min est écoulé
     { 
       feedCat(croquinettes);      // Nourrir le chat avec quelques croquettes
-      lastFeedtimecroquinettes= maintenantSec; // Met à jour le dernier temps de gourmandise
+      lastFeedtimecroquinettes = maintenantSec; // Met à jour le dernier temps de gourmandise
+    Serial.println("El gazou est servi !");
     }
 delay(BoutonSec); // Anti-rebond
 } 
 else 
 {
-Serial.println("Le bouton n'est pas appuyé");
-
 digitalWrite(led, LOW); // Éteint la LED}
 
-char message[56];
-const unsigned int deltaMinutes = deltaSecondes / 60;
-sprintf(message, "Dernières Croquinettes il y a %d min", deltaMinutes);
+char message[56];    // Nombre de caractères max pour le message
+  unsigned long deltaSecondes = maintenantSec - lastFeedtimecroquinettes;  // interval de temps entre maintenant et la derniere gourmandise
+const unsigned int deltaMinutes = deltaSecondes / 60;  // conversion en minutes
+sprintf(message, "Dernières Croquinettes il y a %d min", deltaMinutes); // Prépare le message à afficher
 
       delay(1000);
 }
