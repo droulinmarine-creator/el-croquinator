@@ -30,5 +30,11 @@ const unsigned int croquettes = 500;   // temps (ms) ouverture longue
 
 // --- PARAMETRES TIMER ---
 const unsigned long FEED_DELAY_SEC = 30 * 1000;
+unsigned plagehoraire = true; // Activer ou désactiver la plage horaire de nourrissage
+
+// Capteur de présence de croquettes
+#define IR_PIN D0  // Pin du capteur ir
+
+
 
 #endif

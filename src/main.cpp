@@ -29,6 +29,14 @@ const unsigned long FEED_DELAY_CROQUINETTES_SEC = 30 * 60;   // Délai minimum e
 unsigned long lastFeedtimeCroquettes = 0;                    // Dernier temps (en secondes depuis minuit) où le chat a été nourri avec des croquettes
 unsigned long lastFeedtimecroquinettes = 0;                  // Dernier temps (en secondes depuis minuit) où le chat a été nourri avec quelques croquinettes
 unsigned long maintenantSec = 0;
+unsigned long duréeappuiBoutonSec = 0;
+unsigned long debutappuiBoutonSec  =0;
+// Définition de la plage horaire
+int startHour   = 7;
+int startMinute = 30;
+
+int endHour     = 23;
+int endMinute   = 15;
 
 // Bouton poussoir
 const int BOUTON = D8;    // Pin du bouton poussoir
@@ -52,6 +60,7 @@ unsigned long getRtcSecondsFromMidnight(); // Imprime le temps RTC dans la conso
 char *getWiFiTime();                       // Récupère la date depuis le wifi
 int calculateDistance();                   // Mesure la distance du capteur
 void feedCat(int timeOpen);
+void plageHoraire (int h, int m);           // Définit la plage horaire de nourrissage
 // -------------------           DECLARATION DES FONCTIONS (fin)           ------------------- /
 
 // -------------------                INITIALISATION (début)                ------------------- /
@@ -96,6 +105,9 @@ void setup()
   // Configuration de la LED
   pinMode(led, OUTPUT); // la led est une sortie
 
+  // Confirguration du capteur ir
+  pinMode(IR_PIN, INPUT); // le capteur ir est une entrée
+
   // Just to know which program is running
   Serial.println(F("START " __FILE__ " from " __DATE__ "\r\n"));
 }
@@ -105,6 +117,14 @@ void setup()
 void loop()
 {
   Serial.println("Début de la Boucle principale");
+
+  int h = myRTC.hours;
+  int m = myRTC.minutes;
+  
+  if ((h > startHour || (h == startHour && m >= startMinute)) &&
+        (h < endHour || (h == endHour && m <= endMinute))) {
+      Serial.println("Dans la plage horaire de nourrissage.");
+
 
   // fonction principale
   // Vérifier l'heure
@@ -116,24 +136,53 @@ void loop()
   if (deltaSecondes >= FEED_DELAY_CROQUETTES_SEC) // Si le délai de 2H est écoulé
   {
     // Vérifier la distance
+    boolean PrésencedeCroquettes = digitalRead(IR_PIN); // Lire l'état du capteur IR
+    if (PrésencedeCroquettes == HIGH ) // Si des croquettes sont présentes
+  { 
+     Serial.println("Des croquetttes sont dans la gamelle");
+     delay(60*1000*60); //Attendre 1 heure pour vérifier à nouveau si Gazou a mangé avant de lui donner à nouveau
+}
+else
+// Nourrir el Gazou
+{
+ Serial.println("Pas de croquetttes dans la gamelle");
+
     feedCat(croquettes);                    // Nourrir le chat avec une portion complète
     lastFeedtimeCroquettes = maintenantSec; // Met à jour le dernier temps de nourrissage
+   preferences.putULong("lastFeedtimecroquinettes", lastFeedtimecroquinettes); // Sauvegarder le temps de nourrissage dans la mémoire persistante
+   Serial.println("El Gazou a eu sa dose");
+}
   }
 
   // Vérifier les boutons
-  etatBouton = digitalRead(BOUTON); // Lecture de l'état du bouton
+  boolean etatBouton = digitalRead(BOUTON); // Lecture de l'état du bouton
 
-  if (etatBouton == HIGH) // Si le bouton est appuyé
+  if (etatBouton == LOW) // Si le bouton est appuyé
   {
     Serial.println("Le bouton est appuyé");
+     boolean led = digitalRead(led);
+     Serial.println("Allumage de la led");
     digitalWrite(led, HIGH); // Allume la LED
+   debutappuiBoutonSec = maintenantSec; // Enregistre le temps de début de l'appui sur le bouton
+   duréeappuiBoutonSec = (maintenantSec - debutappuiBoutonSec); // Calcul du temps d'appui sur le bouton en secondes
+    
+   if (duréeappuiBoutonSec <= 1) // Si le bouton est appuyé pendant moins de 1 seconde
+   {
+    Serial.println("appui court détecté");
+    printMessage("super affichage S","affichage S a ajouter", 3);    // Afficher les dernières croquettes et croquinettes servies
+   }
 
+   if (duréeappuiBoutonSec > 1)   // Si le bouton est appuyé pendant plus de 1 seconde
+  {
+    Serial.println("appui long détecté");
     unsigned long deltaSecondes = maintenantSec - lastFeedtimecroquinettes; // interval de temps
 
     if (deltaSecondes >= FEED_DELAY_CROQUINETTES_SEC) // Si le délai de 30 min est écoulé
     {
+      Serial.println("Délai écoulé, on peut donner une gourmandise/crpquinette");
       feedCat(croquinettes);                    // Nourrir le chat avec quelques croquettes
       lastFeedtimecroquinettes = maintenantSec; // Met à jour le dernier temps de gourmandise
+      preferences.putULong("lastFeedtimecroquinettes", lastFeedtimecroquinettes); // Sauvegarder le temps de nourrissage dans la mémoire persistante
       Serial.println("El gazou est servi !");
     }
     delay(BoutonSec); // Anti-rebond
@@ -141,6 +190,8 @@ void loop()
   else
   {
     digitalWrite(led, LOW); // Éteint la LED}
+    Serial.println("Extinction de la led");
+    printImage(4);  // Afficher l'image du chat
 
     char message[56];                                                       // Nombre de caractères max pour le message
     unsigned long deltaSecondes = maintenantSec - lastFeedtimecroquinettes; // interval de temps entre maintenant et la derniere gourmandise
@@ -149,6 +200,8 @@ void loop()
 
     delay(1000);
   }
+  }
+}
 }
 // -------------------                BOUCLE LOOP (fin)                ------------------- /
 
@@ -156,14 +209,13 @@ void feedCat(int timeOpen)
 {
   Serial.println("Nourrir le chat !");
   // Bonus: Prévenir le chat avec un son ou une led
+openValve(timeOpen);   // Ouvrir la valve pour laisser tomber les croquettes
+}
+  
+  
 
-  // Ouvrir la valve pour laisser tomber les croquettes
-  openValve(timeOpen);
-  // Enregistrer l'heure de feed
-  // preferences.putULong("feedtime", value);
+ 
   // Bonus: Afficher un message sur ecran
-};
-
 // -------------------                FONCTIONS                ------------------- /
 // Initialize SPIFFS (mémoire persistante)
 void setupSPIFFS()
