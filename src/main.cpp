@@ -94,8 +94,9 @@ void printMessage(char *title, char *message, unsigned int displayTimeSec); // A
 void printImage(unsigned int displayTimeSec);                               // Affichage d'une image au centre de l'écran
 void openValve(unsigned int timeOpen);                                      // Donne la nourriture
 void getRtcTime();                                                          // Imprime le temps RTC dans la console
-String getWiFiTime();                                                       // Récupère la date depuis le wifi
-int calculateDistance();                                                    // Mesure la distance du capteur
+unsigned long getRtcSecondsFromMidnight()
+    String getWiFiTime(); // Récupère la date depuis le wifi
+int calculateDistance();  // Mesure la distance du capteur
 // -------------------           DECLARATION DES FONCTIONS (fin)           ------------------- /
 
 // -------------------                INITIALISATION (début)                ------------------- /
@@ -266,6 +267,16 @@ void getRtcTime()
   Serial.print(myRTC.minutes);
   Serial.print(":");
   Serial.println(myRTC.seconds);
+}
+
+unsigned long getRtcSecondsFromMidnight()
+{
+  myRTC.updateTime();
+  unsigned long totalSeconds = (unsigned long)myRTC.hours * 3600L;
+  totalSeconds += (unsigned long)myRTC.minutes * 60L;
+  totalSeconds += (unsigned long)myRTC.seconds;
+
+  return totalSeconds;
 }
 
 // Get time stamp
