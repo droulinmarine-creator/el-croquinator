@@ -23,11 +23,11 @@ const char *password = "LP48.100+";
 
 // Ecran OLED
 #include <Adafruit_SSD1306.h>
-#define SCREEN_WIDTH 128     // Taille de l'écran OLED, en pixel, au niveau de sa largeur
+#define SCREEN_WIdtH 128     // Taille de l'écran OLED, en pixel, au niveau de sa largeur
 #define SCREEN_HEIGHT 64     // Taille de l'écran OLED, en pixel, au niveau de sa hauteur
 #define OLED_RESET_PIN -1    // Reset de l'OLED partagé avec l'Arduino (d'où la valeur à -1, et non un numéro de pin)
 #define OLED_I2C_ADRESS 0x3C // Adresse de "mon" écran OLED sur le bus i2c (généralement égal à 0x3C ou 0x3D)
-Adafruit_SSD1306 oled(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET_PIN);
+Adafruit_SSD1306 oled(SCREEN_WIdtH, SCREEN_HEIGHT, &Wire, OLED_RESET_PIN);
 
 // Capteur distance HC-SR04
 #define ECHO_PIN 7
@@ -35,19 +35,20 @@ Adafruit_SSD1306 oled(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET_PIN);
 
 // Servomoteur
 #include <Servo.h>
-#define SERVO_PIN 4
-Servo maValve;                       // Crée un objet Servo
+#define SERVO_PIN 3
+Servo monServomoteur;                       // Crée un objet Servo
 const int ANGLE_OUVERTURE = 180;     // Angle pour ouvrir la valve
 const int ANGLE_FERMETURE = 0;       // Angle pour fermer la valve
-const unsigned int SHORT_OPEN = 111; // temps (ms) ouverture rapide
-const unsigned int LONG_OPEN = 500;  // temps (ms) ouverture longue
+const unsigned int croquinettes = 111; // temps (ms) ouverture rapide
+const unsigned int croquettes = 500;  // temps (ms) ouverture longue
 
 // RTC Time
-#include "virtuabotixRTC.h"
-#define DS1302_CLK_PIN A5
-#define DS1302_DAT_PIN A4
-#define DS1302_RST_PIN 13
-virtuabotixRTC myRTC(DS1302_CLK_PIN, DS1302_DAT_PIN, DS1302_RST_PIN);
+#include <RtcDS1302.h>
+#define DS1302_CLK_PIN 6
+#define DS1302_DAT_PIN 7
+#define DS1302_RST_PIN 5
+ThreeWire myWire(DS1302_DAT_PIN,DS1302_CLK_PIN,DS1302_RST_PIN); // IO, SCLK, CE
+RtcDS1302<ThreeWire> myRTC(myWire);
 
 /* Local time */
 const char *ntpServer = "pool.ntp.org";
@@ -55,13 +56,14 @@ const long gmtOffset_sec = 3600;
 const int daylightOffset_sec = 3600;
 
 // Timer variables
-const unsigned long FEED_DELAY_SEC = 30 * 1000;
-unsigned long lastFeedTime;
-unsigned long currentTime;
+const unsigned long FEED_DELAY_SEC = 10 ;
+RtcDateTime lastFeedtime;
+unsigned long heureactuelle;
+
 
 // Logo (chat)
 const int IMAGE_HEIGHT = 40;
-const int IMAGE_WIDTH = 60;
+const int IMAGE_WIdtH = 60;
 const unsigned char IMAGE_CHAT[] PROGMEM = {
     // 'silhouette-cute-cat-peeking-vector-600nw-2593333797, 60x40px
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -93,9 +95,10 @@ void setupScreen();                                                         // (
 void printMessage(char *title, char *message, unsigned int displayTimeSec); // Affiche un message sur l'écran OLED
 void printImage(unsigned int displayTimeSec);                               // Affichage d'une image au centre de l'écran
 void openValve(unsigned int timeOpen);                                      // Donne la nourriture
-void getRtcTime();                                                          // Imprime le temps RTC dans la console
-String getWiFiTime();                                                       // Récupère la date depuis le wifi
+RtcDateTime getRtcTime();                                                          // Imprime le temps RTC dans la console
+char* getWiFiTime();                                                       // Récupère la date depuis le wifi
 int calculateDistance();                                                    // Mesure la distance du capteur
+void feedCat(int timeOpen);
 // -------------------           DECLARATION DES FONCTIONS (fin)           ------------------- /
 
 // -------------------                INITIALISATION (début)                ------------------- /
@@ -113,16 +116,17 @@ void setup()
   // Récupération de l'heure depuis le WiFi
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer); // NTP server config
 
-  // Configuration de l'horloge interne
-  myRTC.setDS1302Time(0, 58, 17, 4, 17, 12, 2020); // sec min h, j semaine, j mois, mois, année
+  // Configuration de l'horloge interne  
+ myRTC.Begin();
+ 
 
   // Configuration du capteur de distance
   pinMode(TRIGGER_PIN, OUTPUT); // Broche Trigger en sortie //
   pinMode(ECHO_PIN, INPUT);     // Broche Echo en entree //
 
   // Configuration du Servomoteur
-  maValve.attach(SERVO_PIN);      // Attache l'objet Servo à la broche D9 de l'Arduino
-  maValve.write(ANGLE_FERMETURE); // S'assure que la valve est fermée au démarrage
+  monServomoteur.attach(SERVO_PIN);      // Attache l'objet Servo à la broche D9 de l'Arduino
+  monServomoteur.write(ANGLE_FERMETURE); // S'assure que la valve est fermée au démarrage
 
   // Just to know which program is running
   Serial.println(F("START " __FILE__ " from " __DATE__ "\r\n"));
@@ -132,32 +136,51 @@ void setup()
 // -------------------                BOUCLE LOOP (début)                ------------------- /
 void loop()
 {
+  Serial.println("Début de la Boucle principale");
 
   // Vérifier l'heure
-  // Si le chat est affamé
-  feedCat()
+  RtcDateTime maintenant = getRtcTime();
+  // Si le chat est affamé : Verifier le délai depuis le dernier
+  unsigned long deltaSecondes = maintenant.TotalSeconds() - lastFeedtime.TotalSeconds();
+  
+  if (deltaSecondes >= FEED_DELAY_SEC) // interval de temps
+    { 
+      feedCat(croquettes);
+    }
+  
 
       // Vérifier la distance
       // Si le chat est trop insistant
-      feedCat() // Bonus: diminuer le temps d'ouverture pour un petit feed
+      //feedCat(); // Bonus: diminuer le temps d'ouverture pour un petit feed
 
       // Vérifier les boutons
       // Si un humain veut nourrir le chat
-      feedCat()
+      // Verifier le délai depuis le dernier
+      // Si OK
+    
+      //feedCat();
+      //SI NON
+      //printMessage("Attente...", "Prochain repas dans 2h", 5);
+
+      delay(1000);
 }
 // -------------------                BOUCLE LOOP (fin)                ------------------- /
 
-void feedCat()
+void feedCat(int timeOpen)
 {
+  Serial.println("Nourrir le chat !");
   // Bonus: Prévenir le chat avec un son ou une led
-  // Ouvrir la valve
+
+    // Ouvrir la valve pour laisser tomber les croquettes
+  openValve(timeOpen);
   // Enregistrer l'heure de feed
-  // preferences.putULong("feedTime", value);
+  lastFeedtime = getRtcTime();
+  // preferences.putULong("feedtime", value);
   // Bonus: Afficher un message sur ecran
-}
+};
 
 // -------------------                FONCTIONS                ------------------- /
-// Initialize SPIFFS
+// Initialize SPIFFS (mémoire persistante)
 void setupSPIFFS()
 {
   if (!SPIFFS.begin())
@@ -171,8 +194,7 @@ void setupSPIFFS()
 }
 void getSavedSettings()
 {
-  currentTime = preferences.getUShort("time", 0);      // 0 par défaut
-  lastFeedTime = preferences.getUShort("feedTime", 0); // 0 par défaut
+  //lastFeedtime = preferences.getUShort("feedtime", 0); // 0 par défaut
 }
 // Initialize WiFi
 void setupWiFi()
@@ -185,8 +207,6 @@ void setupWiFi()
     Serial.print('.');
     delay(1000);
   }
-  server_ip = WiFi.localIP();
-  Serial.println(server_ip);
 }
 
 // Initialisation de l'écran OLED
@@ -203,7 +223,6 @@ void setupScreen()
     Serial.println(F("Initialisation du contrôleur SSD1306 réussi."));
   }
   printImage(1);
-  printWord("Croquinet!", 1);
 }
 void printMessage(char *title, char *message, unsigned int displayTimeSec)
 {
@@ -226,10 +245,10 @@ void printImage(unsigned int displayTimeSec)
 {
   oled.clearDisplay();
   oled.drawBitmap(
-      (oled.width() - IMAGE_WIDTH) / 2,   // Position de l'extrême "gauche" de l'image (pour centrage écran, ici)
+      (oled.width() - IMAGE_WIdtH) / 2,   // Position de l'extrême "gauche" de l'image (pour centrage écran, ici)
       (oled.height() - IMAGE_HEIGHT) / 2, // Position de l'extrême "haute" de l'image (pour centrage écran, ici)
       IMAGE_CHAT,
-      IMAGE_WIDTH,
+      IMAGE_WIdtH,
       IMAGE_HEIGHT,
       WHITE); // "couleur" de l'image
 
@@ -241,35 +260,36 @@ void printImage(unsigned int displayTimeSec)
 
 void openValve(unsigned int timeOpen)
 {
-  Serial.print("Ouverture de la valve (");
+  Serial.print("Ouverture de la valve ");
   Serial.print(timeOpen);
   Serial.println(" ms).");
 
-  maValve.write(ANGLE_OUVERTURE); // Ouvre
+  monServomoteur.write(ANGLE_OUVERTURE); // Ouvre
   delay(timeOpen);                // Attend 0,5 seconde pour laisser tomber la portion
-  maValve.write(ANGLE_FERMETURE); // Ferme
+  monServomoteur.write(ANGLE_FERMETURE); // Ferme
 }
 
-void getRtcTime()
-{
-  myRTC.updateTime();
+RtcDateTime getRtcTime()
+{ 
+RtcDateTime dt = myRTC.GetDateTime();
+char datestring[26];
 
-  Serial.print("Date / Heure: ");
-  Serial.print(myRTC.dayofmonth);
-  Serial.print("/");
-  Serial.print(myRTC.month);
-  Serial.print("/");
-  Serial.print(myRTC.year);
-  Serial.print(" ");
-  Serial.print(myRTC.hours);
-  Serial.print(":");
-  Serial.print(myRTC.minutes);
-  Serial.print(":");
-  Serial.println(myRTC.seconds);
+    snprintf_P(datestring, 
+            countof(datestring),
+            PSTR("%02u/%02u/%04u %02u:%02u:%02u"),
+            dt.Month(),
+            dt.Day(),
+            dt.Year(),
+            dt.Hour(),
+            dt.Minute(),
+            dt.Second() );
+    Serial.println(datestring);
+    
+    return dt;
 }
 
 // Get time stamp
-String getWiFiTime()
+char* getWiFiTime()
 {
   struct tm timeinfo;
   if (!getLocalTime(&timeinfo))
@@ -280,7 +300,7 @@ String getWiFiTime()
   char timeStr[19];
   strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", &timeinfo);
   // strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &timeinfo);
-  return String(timeStr);
+  return timeStr;
 }
 
 int calculateDistance()
